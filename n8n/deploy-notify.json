@@ -1,0 +1,14 @@
+{
+  "name": "FolioForge v2 • Deploy Notify (WhatsApp)",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"folioforge-notify-v2","responseMode":"lastNode"},"id":"webhook","name":"Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0]},
+    {"parameters":{"jsCode":"const name=($json.body?.name??$json.name??'').toString().slice(0,200);\nconst url=($json.body?.url??$json.url??'').toString().slice(0,500);\nif(!name||!url){throw new Error('name and url are required');}\nreturn [{json:{name,url}}];"},"id":"validate","name":"Validate Payload","type":"n8n-nodes-base.code","typeVersion":2,"position":[220,0]},
+    {"parameters":{"method":"POST","url":"=https://graph.facebook.com/v20.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Authorization","value":"=Bearer {{$env.WHATSAPP_ACCESS_TOKEN}}"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","jsonBody":"={{JSON.stringify({messaging_product:'whatsapp',to:$env.WHATSAPP_NOTIFY_TO,type:'text',text:{body:`New FolioForge deploy\\nName: ${$json.name}\\nLink: ${$json.url}`}})}}","options":{}},"id":"whatsapp","name":"Send WhatsApp Message","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[440,0]},
+    {"parameters":{"respondWith":"json","responseBody":"={{JSON.stringify({ok:true})}}","options":{}},"id":"response","name":"Respond","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.4,"position":[660,0]}
+  ],
+  "connections":{
+    "Webhook":{"main":[[{"node":"Validate Payload","type":"main","index":0}]]},
+    "Validate Payload":{"main":[[{"node":"Send WhatsApp Message","type":"main","index":0}]]},
+    "Send WhatsApp Message":{"main":[[{"node":"Respond","type":"main","index":0}]]}
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name":"FolioForge v2 • CV to Portfolio",
+  "nodes":[
+    {"parameters":{"httpMethod":"POST","path":"folioforge-cv-v2","responseMode":"lastNode"},"id":"webhook","name":"Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0]},
+    {"parameters":{"operation":"pdf","binaryPropertyName":"file"},"id":"extract","name":"Extract PDF Text","type":"n8n-nodes-base.extractFromFile","typeVersion":1,"position":[220,0]},
+    {"parameters":{"jsCode":"const text=$json.text||$json.data||''; return [{json:{text,source:'folioforge-v2'}}];"},"id":"normalize","name":"Normalize CV Text","type":"n8n-nodes-base.code","typeVersion":2,"position":[440,0]},
+    {"parameters":{"method":"POST","url":"={{$env.FOLIOFORGE_LLM_URL}}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Authorization","value":"=Bearer {{$env.FOLIOFORGE_LLM_KEY}}"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"json","jsonBody":"={{JSON.stringify({model:$env.FOLIOFORGE_LLM_MODEL||'your-model',messages:[{role:'system',content:'Extract a CV into the exact FolioForge PortfolioData schema. Return JSON only. Do not invent missing information. Use empty strings or empty arrays when absent. IDs may be short random strings.'},{role:'user',content:$json.text}] ,response_format:{type:'json_object'}})}}","options":{}},"id":"llm","name":"AI Structured Extraction","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[680,0]},
+    {"parameters":{"jsCode":"const raw=$json.body??$json; const content=raw.choices?.[0]?.message?.content??raw.content??raw; const portfolio=typeof content==='string'?JSON.parse(content):content; return [{json:{portfolio,source:'cv'}}];"},"id":"parse","name":"Validate Portfolio JSON","type":"n8n-nodes-base.code","typeVersion":2,"position":[920,0]},
+    {"parameters":{"respondWith":"json","responseBody":"={{JSON.stringify($json)}}","options":{}},"id":"response","name":"Return Portfolio","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.4,"position":[1170,0]}
+  ],
+  "connections":{"Webhook":{"main":[[{"node":"Extract PDF Text","type":"main","index":0}]]},"Extract PDF Text":{"main":[[{"node":"Normalize CV Text","type":"main","index":0}]]},"Normalize CV Text":{"main":[[{"node":"AI Structured Extraction","type":"main","index":0}]]},"AI Structured Extraction":{"main":[[{"node":"Validate Portfolio JSON","type":"main","index":0}]]},"Validate Portfolio JSON":{"main":[[{"node":"Return Portfolio","type":"main","index":0}]]}}
+}
