@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { parseCVText } from '@/lib/ai-engine';
+import { cleanPDFNoise, parseCVText } from '@/lib/ai-engine';
 
 export const runtime = 'nodejs';
 
@@ -50,18 +50,38 @@ export async function POST(request: Request) {
       }
     }
 
-    // Smart Local Fallback Extractor
+    // Smart Local Fallback Extractor with pdf-parse node entry
     const buffer = Buffer.from(await file.arrayBuffer());
-    let rawText = buffer.toString('utf-8');
+    let extractedText = '';
 
-    // Clean control chars for text/json/md files
-    rawText = rawText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') || buffer.slice(0, 5).toString() === '%PDF-';
 
-    const portfolioData = parseCVText(rawText);
+    if (isPdf) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { parse } = require('pdf-parse/node');
+        const pdfData = await parse(buffer);
+        extractedText = pdfData.text || pdfData.content || '';
+      } catch {
+        // Fallback to pdf-parse main or string cleaning
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pdfParse = require('pdf-parse');
+          const pdfData = await (pdfParse.default || pdfParse)(buffer);
+          extractedText = pdfData.text || '';
+        } catch {
+          extractedText = cleanPDFNoise(buffer.toString('utf-8'));
+        }
+      }
+    } else {
+      extractedText = buffer.toString('utf-8');
+    }
+
+    const portfolioData = parseCVText(extractedText);
     return NextResponse.json({
       portfolio: portfolioData,
       source: webhook ? 'n8n-fallback' : 'local-ai-parser',
-      message: 'CV extracted using FolioForge auto-detection engine.'
+      message: 'CV extracted cleanly using FolioForge PDF parser & auto-detection engine.'
     });
 
   } catch (error) {

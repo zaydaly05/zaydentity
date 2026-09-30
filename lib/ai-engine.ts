@@ -19,15 +19,34 @@ function escapeRegExp(str: string): string {
 
 function matchKeyword(text: string, kw: string): boolean {
   const escaped = escapeRegExp(kw);
-  // Word boundaries like \b don't work after special chars like ++ or #, so handle boundary safely
   const regex = new RegExp(`(?:^|\\W)${escaped}(?:$|\\W)`, 'i');
   return regex.test(text);
 }
 
 /**
+ * Removes raw binary PDF metadata, tags, and object streams from extracted text.
+ */
+export function cleanPDFNoise(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => {
+      if (!line) return false;
+      // Filter out PDF stream & structural commands
+      if (/^%PDF-/i.test(line)) return false;
+      if (/<<|>>|\/Type|\/Font|\/Filter|\/FlateDecode|\/Linearized|\/XRef|\/DecodeParms|\/Pages|\/Catalog|\/Length|\/Predictor|\/Columns|\/OpenAction|\/Outlines/i.test(line)) return false;
+      if (/^\d+\s+\d+\s+obj/i.test(line) || /^endobj/i.test(line) || /^stream/i.test(line) || /^endstream/i.test(line)) return false;
+      if (/^[<\[]\s*[a-f0-9\s]{16,}\s*[>\]]/i.test(line)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
+/**
  * Parses raw text or structured text into a PortfolioData object using intelligent rule-based auto-detection.
  */
-export function parseCVText(text: string): PortfolioData {
+export function parseCVText(rawText: string): PortfolioData {
+  const text = cleanPDFNoise(rawText);
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   
   // 1. Auto-detect Contact Info & Socials
@@ -48,10 +67,11 @@ export function parseCVText(text: string): PortfolioData {
   let title = 'Software Engineer';
   let location = '';
 
-  if (lines.length > 0) {
-    const topNameCandidate = lines[0].replace(/[^a-zA-Z\s.'-]/g, '').trim();
-    if (topNameCandidate && topNameCandidate.length < 40) {
-      name = topNameCandidate;
+  for (const line of lines) {
+    const candidate = line.replace(/[^a-zA-Z\s.'-]/g, '').trim();
+    if (candidate && candidate.length > 2 && candidate.length < 35 && !candidate.toLowerCase().includes('pdf') && !candidate.toLowerCase().includes('resume') && !candidate.toLowerCase().includes('curriculum')) {
+      name = candidate;
+      break;
     }
   }
 
@@ -59,10 +79,10 @@ export function parseCVText(text: string): PortfolioData {
     'Developer', 'Engineer', 'Architect', 'Designer', 'Manager', 'Analyst', 'Consultant',
     'Specialist', 'Lead', 'Scientist', 'Full Stack', 'Frontend', 'Backend', 'DevOps', 'Data Scientist'
   ];
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
+  for (let i = 0; i < Math.min(12, lines.length); i++) {
     const line = lines[i];
     if (titleKeywords.some(kw => line.toLowerCase().includes(kw.toLowerCase())) && line.length < 60) {
-      if (!name || line !== name) {
+      if (!name || line.toLowerCase() !== name.toLowerCase()) {
         title = line;
         break;
       }
