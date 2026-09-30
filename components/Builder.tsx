@@ -6,13 +6,13 @@ import {
   ImagePlus, LayoutTemplate, Linkedin, Monitor, Palette, PanelLeft, Plus, Redo2,
   Rocket, Save, Sparkles, Trash2, Undo2, Upload, Wand2, X, ExternalLink, Copy,
   Eye, EyeOff, RefreshCw, Smartphone, Tablet, Zap, AlertCircle, FileCode, CheckCircle2,
-  Sliders, ShieldCheck, Sparkle
+  Sliders, ShieldCheck, Sparkle, MessageSquare, CheckCircle, Target, Award, Globe
 } from 'lucide-react';
 import type { Device, PortfolioConfig, PortfolioData, Project, TemplateId, ThemeId } from '@/types/portfolio';
 import { demoPortfolio } from '@/lib/demo-data';
 import { templates, themes } from '@/lib/templates';
 import { techColor } from '@/lib/tech-colors';
-import { auditPortfolio, detectMissingTechSkills, parseCVText, recommendDesign } from '@/lib/ai-engine';
+import { AuditBreakdown, auditPortfolio, detectMissingTechSkills, parseCVText, recommendDesign, tailorPortfolioForRole } from '@/lib/ai-engine';
 
 async function notifyDeploy(name: string, url: string) {
   try {
@@ -21,9 +21,10 @@ async function notifyDeploy(name: string, url: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, url }),
     });
-    return res.ok;
+    const data = await res.json();
+    return { ok: res.ok, whatsapp: data.whatsapp };
   } catch {
-    return false;
+    return { ok: false, whatsapp: false };
   }
 }
 
@@ -41,6 +42,12 @@ const SECTION_NAMES: Record<string, string> = {
 };
 const ALL_SECTION_IDS = ['experience', 'projects', 'education', 'activities', 'skills', 'softSkills', 'languages', 'contact'];
 
+interface Toast {
+  id: string;
+  type: 'info' | 'success' | 'warning';
+  message: string;
+}
+
 export default function Builder() {
   const [portfolio, setPortfolio] = useState<PortfolioConfig>(() => clone(demoPortfolio));
   const [past, setPast] = useState<PortfolioConfig[]>([]);
@@ -50,6 +57,7 @@ export default function Builder() {
   const [deployOpen, setDeployOpen] = useState(false);
   const [cvModalOpen, setCvModalOpen] = useState(false);
   const [status, setStatus] = useState('Ready. Everything is stored locally in this browser.');
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,12 +65,17 @@ export default function Builder() {
   const theme = themes.find(t => t.id === portfolio.theme) || themes[0];
   const chromeAccent = theme.id === 'paper' ? '#f97316' : theme.accent;
 
-  // Auto-detected missing tech skills
   const missingSkills = useMemo(() => detectMissingTechSkills(portfolio.data), [portfolio.data]);
-  // Design recommendation
   const recommendedDesign = useMemo(() => recommendDesign(portfolio.data), [portfolio.data]);
-  // Portfolio health audit
   const audit = useMemo(() => auditPortfolio(portfolio), [portfolio]);
+
+  function addToast(message: string, type: Toast['type'] = 'info') {
+    const id = uid();
+    setToasts(prev => [...prev.slice(-3), { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3200);
+  }
 
   useEffect(() => {
     try {
@@ -123,6 +136,7 @@ export default function Builder() {
     setFuture(f => [clone(portfolio), ...f.slice(0, 39)]);
     setPortfolio(clone(previous));
     setStatus('Undo applied.');
+    addToast('Undo applied', 'info');
   }
 
   function redo() {
@@ -132,6 +146,7 @@ export default function Builder() {
     setPast(p => [...p.slice(-39), clone(portfolio)]);
     setPortfolio(clone(next));
     setStatus('Redo applied.');
+    addToast('Redo applied', 'info');
   }
 
   function updateData(fn: (p: PortfolioConfig) => void) { commit(fn); }
@@ -148,12 +163,23 @@ export default function Builder() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'AI workflow failed');
       if (j.portfolio) commit(j.portfolio);
-      setStatus(j.message || 'AI optimization completed. Review changes below.');
+      const msg = j.message || 'AI optimization completed.';
+      setStatus(msg);
+      addToast(msg, 'success');
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : 'AI workflow unavailable.');
+      const errStr = e instanceof Error ? e.message : 'AI workflow unavailable.';
+      setStatus(errStr);
+      addToast(errStr, 'warning');
     } finally {
       setAiBusy(false);
     }
+  }
+
+  function handleTailorRole(roleKey: string) {
+    const result = tailorPortfolioForRole(roleKey, portfolio);
+    commit(result.portfolio);
+    setStatus(result.message);
+    addToast(result.message, 'success');
   }
 
   function applyDetectedSkills() {
@@ -161,7 +187,9 @@ export default function Builder() {
     commit(p => {
       p.data.skills = Array.from(new Set([...p.data.skills, ...missingSkills]));
     });
-    setStatus(`Added ${missingSkills.length} auto-detected skills to your portfolio.`);
+    const msg = `Added ${missingSkills.length} auto-detected skills to portfolio.`;
+    setStatus(msg);
+    addToast(msg, 'success');
   }
 
   function applyRecommendedDesign() {
@@ -169,19 +197,23 @@ export default function Builder() {
       p.template = recommendedDesign.template;
       p.theme = recommendedDesign.theme;
     });
-    setStatus(`Applied recommended design: ${recommendedDesign.template.toUpperCase()} + ${recommendedDesign.theme.toUpperCase()}`);
+    const msg = `Applied recommended design: ${recommendedDesign.template.toUpperCase()} + ${recommendedDesign.theme.toUpperCase()}`;
+    setStatus(msg);
+    addToast(msg, 'success');
   }
 
   function reset() {
     if (confirm('Reset this local portfolio to the demo dataset?')) {
       commit(clone(demoPortfolio));
       setStatus('Demo portfolio restored.');
+      addToast('Demo portfolio restored', 'info');
     }
   }
 
   function downloadJSON() {
     downloadBlob(JSON.stringify(portfolio, null, 2), `${slug(portfolio.data.personal.name) || 'portfolio'}-folioforge.json`, 'application/json');
     setStatus('Portfolio JSON exported.');
+    addToast('JSON exported', 'success');
   }
 
   async function downloadProject() {
@@ -193,6 +225,7 @@ export default function Builder() {
     const zip = makeZip(files);
     downloadBlob(zip, `${slug(portfolio.data.personal.name) || 'portfolio'}-folioforge.zip`, 'application/zip');
     setStatus('Static portfolio ZIP generated.');
+    addToast('Static portfolio ZIP downloaded!', 'success');
   }
 
   const nav = [
@@ -296,7 +329,7 @@ export default function Builder() {
           {active === 'content' && <ContentPanel portfolio={portfolio} update={updateData} missingSkills={missingSkills} onAddMissing={applyDetectedSkills} />}
           {active === 'sections' && <SectionsPanel portfolio={portfolio} update={updateData} />}
           {active === 'images' && <ImagesPanel portfolio={portfolio} update={updateData} setStatus={setStatus} />}
-          {active === 'assistant' && <AssistantPanel busy={aiBusy} onRun={aiAction} />}
+          {active === 'assistant' && <AssistantPanel busy={aiBusy} onRun={aiAction} onTailorRole={handleTailorRole} />}
 
           <div className="preview-wrap" style={{ maxWidth: device === 'mobile' ? 390 : device === 'tablet' ? 760 : 1100 }}>
             <PortfolioPreview portfolio={portfolio} />
@@ -347,8 +380,47 @@ export default function Builder() {
         </aside>
       </main>
 
-      {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} onExport={downloadProject} defaultName={portfolio.data.personal.name} />}
-      {cvModalOpen && <ImportCVModal onClose={() => setCvModalOpen(false)} onImport={(data) => { commit(p => { p.data = data; p.meta = { ...p.meta, source: 'cv' }; }); setActive('content'); setStatus('CV auto-detected and extracted successfully!'); }} setStatus={setStatus} />}
+      {/* Floating Toast System */}
+      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            className="glass"
+            style={{
+              padding: '10px 14px',
+              borderRadius: 12,
+              background: 'rgba(15, 16, 18, 0.92)',
+              border: `1px solid ${t.type === 'success' ? 'var(--good)' : t.type === 'warning' ? 'var(--bad)' : 'var(--intel-2)'}`,
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 500,
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              pointerEvents: 'auto',
+              animation: 'ffFadeUp 0.3s cubic-bezier(0.2,0.7,0.2,1) both'
+            }}
+          >
+            {t.type === 'success' ? <CheckCircle size={15} color="var(--good)" /> : <Sparkle size={15} color="var(--intel-2)" />}
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
+
+      {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} onExport={downloadProject} defaultName={portfolio.data.personal.name} addToast={addToast} />}
+      {cvModalOpen && (
+        <ImportCVModal
+          onClose={() => setCvModalOpen(false)}
+          onImport={(data) => {
+            commit(p => { p.data = data; p.meta = { ...p.meta, source: 'cv' }; });
+            setActive('content');
+            setStatus('CV auto-detected and extracted successfully!');
+            addToast('CV extracted and imported!', 'success');
+          }}
+          setStatus={setStatus}
+        />
+      )}
     </div>
   );
 }
@@ -528,7 +600,7 @@ function ContentPanel({
         </div>
       </div>
 
-      {/* Experience & Education */}
+      {/* Experience, Projects & Education */}
       <div style={{ marginTop: 22 }}>
         <ExperienceEditor experience={d.experience} update={update} />
         <ProjectsEditor projects={d.projects} update={update} />
@@ -793,7 +865,15 @@ function ImagesPanel({ portfolio, update, setStatus }: { portfolio: PortfolioCon
   );
 }
 
-function AssistantPanel({ busy, onRun }: { busy: boolean; onRun: (prompt: string) => void }) {
+function AssistantPanel({
+  busy,
+  onRun,
+  onTailorRole
+}: {
+  busy: boolean;
+  onRun: (prompt: string) => void;
+  onTailorRole: (roleKey: string) => void;
+}) {
   const [prompt, setPrompt] = useState('');
   const ideas = [
     'Make my About section more concise and impactful',
@@ -803,16 +883,43 @@ function AssistantPanel({ busy, onRun }: { busy: boolean; onRun: (prompt: string
     'Auto-fix missing sections and polish portfolio content'
   ];
 
+  const rolePresets = [
+    { key: 'fullstack', title: 'Full-Stack Engineer', desc: 'React, Next.js, Node.js, SQL' },
+    { key: 'ai-ml', title: 'AI/ML Specialist', desc: 'PyTorch, Python, LLMs, FastAPI' },
+    { key: 'devops', title: 'DevOps Architect', desc: 'Kubernetes, Docker, AWS, CI/CD' },
+    { key: 'ui-ux', title: 'UI/UX Designer', desc: 'Figma, Design Systems, Tailwind' }
+  ];
+
   return (
     <div className="panel">
       <div className="panelhead">
         <div>
           <div className="eyebrow">AI Assistant</div>
-          <h1>Portfolio Copilot</h1>
-          <p className="sub">Ask the AI to optimize your bio, detect missing skills, or enhance project descriptions.</p>
+          <h1>Portfolio Copilot & Role Tailoring</h1>
+          <p className="sub">Ask the AI to optimize your bio, detect missing skills, or tailor your profile for target roles.</p>
         </div>
         <div className="iconbox" style={{ background: 'color-mix(in srgb, var(--intel) 16%, var(--panel2))', borderColor: 'color-mix(in srgb, var(--intel) 35%, var(--line-soft))' }}>
           <Zap size={18} color="var(--intel-2)" />
+        </div>
+      </div>
+
+      {/* Role Target Presets */}
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+        <div className="tiny" style={{ fontWeight: 700, color: 'var(--intel-2)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Target size={13} /> 1-Click Career Role Tailored Presets
+        </div>
+        <div className="grid cols2" style={{ gap: 8 }}>
+          {rolePresets.map(role => (
+            <button
+              key={role.key}
+              className="btn ghost"
+              style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '8px 10px', background: 'var(--panel2)', border: '1px solid var(--line-soft)' }}
+              onClick={() => onTailorRole(role.key)}
+            >
+              <b style={{ fontSize: 11, color: '#eee' }}>{role.title}</b>
+              <span className="tiny" style={{ opacity: 0.7 }}>{role.desc}</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -843,7 +950,7 @@ function PublishingHealth({
   audit,
   onQuickFix
 }: {
-  audit: { score: number; issues: string[]; isReady: boolean };
+  audit: AuditBreakdown;
   onQuickFix: () => void;
 }) {
   const color = audit.score >= 80 ? 'var(--good)' : audit.score >= 50 ? 'var(--brand)' : 'var(--bad)';
@@ -857,6 +964,22 @@ function PublishingHealth({
 
       <div style={{ height: 6, background: 'var(--panel2)', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${audit.score}%`, background: color, transition: 'width .4s ease' }} />
+      </div>
+
+      {/* Detailed Category Scores */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 4, marginTop: 10, textAlign: 'center' }}>
+        <div style={{ background: 'var(--panel2)', borderRadius: 6, padding: '4px 2px' }}>
+          <div className="tiny" style={{ fontSize: 9, opacity: 0.7 }}>Bio</div>
+          <b style={{ fontSize: 11, color: audit.identityScore >= 15 ? 'var(--good)' : 'var(--muted)' }}>{audit.identityScore}/20</b>
+        </div>
+        <div style={{ background: 'var(--panel2)', borderRadius: 6, padding: '4px 2px' }}>
+          <div className="tiny" style={{ fontSize: 9, opacity: 0.7 }}>Projects</div>
+          <b style={{ fontSize: 11, color: audit.projectsScore >= 12 ? 'var(--good)' : 'var(--muted)' }}>{audit.projectsScore}/20</b>
+        </div>
+        <div style={{ background: 'var(--panel2)', borderRadius: 6, padding: '4px 2px' }}>
+          <div className="tiny" style={{ fontSize: 9, opacity: 0.7 }}>SEO/Meta</div>
+          <b style={{ fontSize: 11, color: audit.seoScore >= 14 ? 'var(--good)' : 'var(--muted)' }}>{audit.seoScore}/20</b>
+        </div>
       </div>
 
       <div style={{ marginTop: 10 }}>
@@ -1132,18 +1255,33 @@ function ImportCVModal({
   );
 }
 
-function DeployModal({ onClose, onExport, defaultName }: { onClose: () => void; onExport: () => void; defaultName: string }) {
+function DeployModal({
+  onClose,
+  onExport,
+  defaultName,
+  addToast
+}: {
+  onClose: () => void;
+  onExport: () => void;
+  defaultName: string;
+  addToast: (msg: string, type: 'info' | 'success' | 'warning') => void;
+}) {
   const [name, setName] = useState(defaultName || '');
   const [url, setUrl] = useState('');
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [waNotify, setWaNotify] = useState(false);
   const ready = name.trim().length > 0 && url.trim().length > 0;
 
   useEffect(() => {
     if (!ready) { setSendState('idle'); return; }
     setSendState('sending');
     const t = setTimeout(async () => {
-      const ok = await notifyDeploy(name.trim(), url.trim());
-      setSendState(ok ? 'sent' : 'error');
+      const res = await notifyDeploy(name.trim(), url.trim());
+      setSendState(res.ok ? 'sent' : 'error');
+      setWaNotify(res.whatsapp);
+      if (res.ok) {
+        addToast(res.whatsapp ? '✓ Deployment saved & WhatsApp alert sent!' : '✓ Deployment URL registered', 'success');
+      }
     }, 800);
     return () => clearTimeout(t);
   }, [name, url, ready]);
@@ -1153,7 +1291,7 @@ function DeployModal({ onClose, onExport, defaultName }: { onClose: () => void; 
       <div className="modal">
         <div className="panelhead">
           <div>
-            <div className="eyebrow">Publishing</div>
+            <div className="eyebrow">Publishing Studio</div>
             <h1>Deploy Static Portfolio</h1>
             <p className="sub">FolioForge builds a standalone HTML/ZIP site. Zero database or backend needed.</p>
           </div>
@@ -1164,7 +1302,7 @@ function DeployModal({ onClose, onExport, defaultName }: { onClose: () => void; 
           <div style={{ display: 'flex', gap: 10 }}>
             <div className="stepnum">1</div>
             <div>
-              <b style={{ fontSize: 13 }}>Download your Website ZIP</b>
+              <b style={{ fontSize: 13 }}>Download Website ZIP</b>
               <div className="tiny" style={{ marginTop: 4 }}>Contains self-contained index.html with embedded styles & images.</div>
               <button className="btn primary" style={{ marginTop: 9 }} onClick={onExport}><Download size={14} />Download ZIP</button>
             </div>
@@ -1175,14 +1313,14 @@ function DeployModal({ onClose, onExport, defaultName }: { onClose: () => void; 
           <div style={{ display: 'flex', gap: 10 }}>
             <div className="stepnum">2</div>
             <div>
-              <b style={{ fontSize: 13 }}>Deploy on Vercel or Netlify</b>
-              <div className="tiny" style={{ marginTop: 4 }}>Drag & drop your extracted folder or ZIP file into Vercel Drop.</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 9 }}>
+              <b style={{ fontSize: 13 }}>Deploy on Cloud Platforms</b>
+              <div className="tiny" style={{ marginTop: 4 }}>Drag & drop your extracted ZIP into Vercel Drop or Netlify Drop.</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
                 <a className="btn" style={{ textDecoration: 'none' }} href="https://vercel.com/drop" target="_blank" rel="noreferrer">
-                  <Rocket size={14} /> Open Vercel Drop <ExternalLink size={13} />
+                  <Rocket size={14} /> Vercel Drop <ExternalLink size={13} />
                 </a>
                 <a className="btn" style={{ textDecoration: 'none' }} href="https://app.netlify.com/drop" target="_blank" rel="noreferrer">
-                  <ExternalLink size={13} /> Netlify Drop
+                  <Globe size={14} /> Netlify Drop
                 </a>
               </div>
             </div>
@@ -1193,16 +1331,20 @@ function DeployModal({ onClose, onExport, defaultName }: { onClose: () => void; 
           <div style={{ display: 'flex', gap: 10 }}>
             <div className="stepnum">3</div>
             <div style={{ flex: 1 }}>
-              <b style={{ fontSize: 13 }}>Register Deployed URL</b>
-              <div className="tiny" style={{ marginTop: 4 }}>Record your live website link to complete deployment tracking.</div>
+              <b style={{ fontSize: 13 }}>Register Live URL & WhatsApp Alert</b>
+              <div className="tiny" style={{ marginTop: 4 }}>Record your live URL to receive instant WhatsApp notifications via Kapso.</div>
               <div className="formgrid" style={{ marginTop: 10 }}>
                 <Field label="Your Name" value={name} onChange={setName} />
                 <Field label="Live Deployed URL" value={url} onChange={setUrl} />
               </div>
-              <div className="tiny" style={{ marginTop: 8, color: 'var(--brand)' }}>
-                {sendState === 'sending' && 'Saving link...'}
-                {sendState === 'sent' && '✓ Link recorded successfully'}
-                {sendState === 'error' && 'Could not reach notify endpoint.'}
+              <div className="tiny" style={{ marginTop: 8, color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {sendState === 'sending' && <span>Saving & sending alert...</span>}
+                {sendState === 'sent' && (
+                  <span style={{ color: 'var(--good)' }}>
+                    ✓ Link registered {waNotify && '• Instant WhatsApp message delivered'}
+                  </span>
+                )}
+                {sendState === 'error' && <span style={{ color: 'var(--bad)' }}>Could not reach notify endpoint.</span>}
               </div>
             </div>
           </div>

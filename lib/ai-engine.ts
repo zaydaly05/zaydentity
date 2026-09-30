@@ -1,6 +1,6 @@
 import type { PortfolioConfig, PortfolioData, TemplateId, ThemeId } from '@/types/portfolio';
 
-// Extended tech keyword dictionary for auto-detection
+// Extended tech keyword dictionary for auto-detection across 80+ technologies
 const KNOWN_TECH_KEYWORDS = [
   'React', 'React.js', 'Next.js', 'TypeScript', 'JavaScript', 'Node.js', 'Express', 'Vue', 'Vue.js',
   'Angular', 'Svelte', 'Python', 'Django', 'Flask', 'FastAPI', 'Java', 'Spring Boot', 'Kotlin',
@@ -12,6 +12,18 @@ const KNOWN_TECH_KEYWORDS = [
   'HTML', 'HTML5', 'CSS', 'CSS3', 'Sass', 'Linux', 'Bash', 'Redux', 'jQuery', 'OpenAI', 'LangChain',
   'LlamaIndex', 'n8n', 'Elasticsearch', 'Kafka', 'RabbitMQ', 'Microservices', 'CI/CD'
 ];
+
+export interface AuditBreakdown {
+  score: number;
+  identityScore: number;
+  experienceScore: number;
+  projectsScore: number;
+  skillsScore: number;
+  seoScore: number;
+  issues: string[];
+  suggestions: string[];
+  isReady: boolean;
+}
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -32,7 +44,6 @@ export function cleanPDFNoise(text: string): string {
     .map(line => line.trim())
     .filter(line => {
       if (!line) return false;
-      // Filter out PDF stream & structural commands
       if (/^%PDF-/i.test(line)) return false;
       if (/<<|>>|\/Type|\/Font|\/Filter|\/FlateDecode|\/Linearized|\/XRef|\/DecodeParms|\/Pages|\/Catalog|\/Length|\/Predictor|\/Columns|\/OpenAction|\/Outlines/i.test(line)) return false;
       if (/^\d+\s+\d+\s+obj/i.test(line) || /^endobj/i.test(line) || /^stream/i.test(line) || /^endstream/i.test(line)) return false;
@@ -328,50 +339,121 @@ export function recommendDesign(data: PortfolioData): { template: TemplateId; th
 /**
  * Calculates a dynamic 0-100 completion score and audit breakdown for the portfolio.
  */
-export function auditPortfolio(config: PortfolioConfig) {
+export function auditPortfolio(config: PortfolioConfig): AuditBreakdown {
   const d = config.data;
   const issues: string[] = [];
-  let score = 0;
+  const suggestions: string[] = [];
+  
+  let identityScore = 0;
+  let experienceScore = 0;
+  let projectsScore = 0;
+  let skillsScore = 0;
+  let seoScore = 0;
 
-  if (d.personal.name && d.personal.name !== 'Your Name') score += 7;
+  // Identity (max 20)
+  if (d.personal.name && d.personal.name !== 'Your Name') identityScore += 5;
   else issues.push('Add your full name.');
 
-  if (d.personal.title && d.personal.title !== 'Software Developer') score += 6;
+  if (d.personal.title && d.personal.title !== 'Software Developer') identityScore += 5;
   else issues.push('Specify a clear professional title.');
 
-  if (d.personal.email && d.personal.email !== 'you@example.com') score += 6;
+  if (d.personal.email && d.personal.email !== 'you@example.com') identityScore += 5;
   else issues.push('Add a valid contact email address.');
 
-  if (d.personal.about && d.personal.about.length > 40) score += 6;
+  if (d.personal.about && d.personal.about.length > 40) identityScore += 5;
   else issues.push('Write a detailed About / Bio summary.');
 
-  if (d.experience.length > 0) score += 15;
+  // Experience (max 20)
+  if (d.experience.length >= 2) experienceScore += 20;
+  else if (d.experience.length === 1) experienceScore += 12;
   else issues.push('Add at least 1 work experience entry.');
 
-  if (d.education.length > 0) score += 10;
-  else issues.push('Add your education or academic background.');
+  if (d.education.length > 0) experienceScore = Math.min(20, experienceScore + 5);
 
-  if (d.projects.length >= 2) score += 15;
-  else if (d.projects.length === 1) score += 8;
+  // Projects (max 20)
+  if (d.projects.length >= 2) projectsScore += 12;
+  else if (d.projects.length === 1) projectsScore += 6;
   else issues.push('Add at least 2 featured projects.');
 
   const hasProjectImages = d.projects.some(p => !!p.image);
-  if (hasProjectImages) score += 5;
-  else issues.push('Upload project preview screenshots.');
+  if (hasProjectImages) projectsScore += 5;
+  else suggestions.push('Upload project preview screenshots for visual engagement.');
 
-  if (d.personal.avatar) score += 5;
-  else issues.push('Upload a profile photo / avatar.');
+  if (d.personal.avatar) projectsScore += 3;
+  else suggestions.push('Upload a profile photo / avatar.');
 
-  if (d.skills.length >= 5) score += 15;
+  // Skills (max 20)
+  if (d.skills.length >= 6) skillsScore += 20;
+  else if (d.skills.length >= 3) skillsScore += 12;
   else issues.push('Add at least 5 technical skills.');
 
-  if (config.visibleSections.length >= 4) score += 10;
+  // SEO & Socials (max 20)
+  if (d.social.github) seoScore += 7;
+  if (d.social.linkedin) seoScore += 7;
+  if (d.social.website) seoScore += 6;
+  if (!d.social.github && !d.social.linkedin) {
+    issues.push('Add GitHub and LinkedIn social profile links.');
+  }
+
+  const totalScore = identityScore + experienceScore + projectsScore + skillsScore + seoScore;
 
   return {
-    score: Math.min(100, score),
+    score: Math.min(100, totalScore),
+    identityScore,
+    experienceScore,
+    projectsScore,
+    skillsScore,
+    seoScore,
     issues,
-    isReady: score >= 75
+    suggestions,
+    isReady: totalScore >= 75
   };
+}
+
+/**
+ * Tailors portfolio content for a target career role preset.
+ */
+export function tailorPortfolioForRole(roleTarget: string, portfolio: PortfolioConfig): { portfolio: PortfolioConfig; message: string } {
+  const next = JSON.parse(JSON.stringify(portfolio)) as PortfolioConfig;
+  const d = next.data;
+  let message = `Tailored portfolio for ${roleTarget}.`;
+
+  switch (roleTarget) {
+    case 'fullstack':
+      d.personal.title = 'Full-Stack Software Engineer';
+      d.personal.about = 'Full-Stack Software Engineer with expertise in building scalable React/Next.js web applications, robust Node.js microservices, and high-throughput SQL databases.';
+      d.skills = Array.from(new Set(['TypeScript', 'React', 'Next.js', 'Node.js', 'PostgreSQL', 'Docker', 'REST', 'GraphQL', ...d.skills]));
+      next.template = 'bento';
+      next.theme = 'ocean';
+      break;
+    case 'ai-ml':
+      d.personal.title = 'AI & Machine Learning Engineer';
+      d.personal.about = 'AI & Machine Learning Engineer specializing in deep learning models, LLM orchestration, PyTorch, and deploying production AI inference APIs.';
+      d.skills = Array.from(new Set(['Python', 'PyTorch', 'TensorFlow', 'OpenAI', 'LangChain', 'FastAPI', 'Docker', 'SQL', ...d.skills]));
+      next.template = 'modern';
+      next.theme = 'aurora';
+      break;
+    case 'devops':
+      d.personal.title = 'DevOps & Site Reliability Engineer';
+      d.personal.about = 'DevOps Engineer dedicated to cloud architecture, Kubernetes container orchestration, CI/CD pipeline automation, and zero-downtime infrastructure.';
+      d.skills = Array.from(new Set(['Docker', 'Kubernetes', 'AWS', 'Terraform', 'Linux', 'Bash', 'CI/CD', 'Python', ...d.skills]));
+      next.template = 'terminal';
+      next.theme = 'midnight';
+      break;
+    case 'ui-ux':
+      d.personal.title = 'UI/UX Product Designer & Developer';
+      d.personal.about = 'Product Designer and Creative Technologist crafting modern design systems, glassmorphism UIs, interactive micro-animations, and accessible web experiences.';
+      d.skills = Array.from(new Set(['Figma', 'React', 'Tailwind CSS', 'TypeScript', 'HTML5', 'CSS3', 'Design Systems', ...d.skills]));
+      next.template = 'creative';
+      next.theme = 'sunset';
+      break;
+    default:
+      d.personal.about += ' Focused on engineering excellence, robust architecture, and user-centric design.';
+      break;
+  }
+
+  next.meta.updatedAt = new Date().toISOString();
+  return { portfolio: next, message };
 }
 
 /**
