@@ -56,6 +56,7 @@ export default function Builder() {
   const [device, setDevice] = useState<Device>('desktop');
   const [deployOpen, setDeployOpen] = useState(false);
   const [cvModalOpen, setCvModalOpen] = useState(false);
+  const [n8nModalOpen, setN8nModalOpen] = useState(false);
   const [status, setStatus] = useState('Ready. Everything is stored locally in this browser.');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
@@ -253,6 +254,9 @@ export default function Builder() {
           <button className="btn ghost" onClick={redo} disabled={!future.length} title="Ctrl/Cmd + Y">
             <Redo2 size={15} /><span>Redo</span>
           </button>
+          <button className="btn" onClick={() => setN8nModalOpen(true)} title="n8n Workflow Automation Hub">
+            <FileCode size={15} color="var(--brand)" /><span>n8n Hub</span>
+          </button>
           <button className="btn" onClick={downloadJSON} title="Export JSON dataset">
             <Download size={15} /><span>JSON</span>
           </button>
@@ -409,6 +413,7 @@ export default function Builder() {
       </div>
 
       {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} onExport={downloadProject} defaultName={portfolio.data.personal.name} addToast={addToast} />}
+      {n8nModalOpen && <N8nModal onClose={() => setN8nModalOpen(false)} addToast={addToast} />}
       {cvModalOpen && (
         <ImportCVModal
           onClose={() => setCvModalOpen(false)}
@@ -1250,6 +1255,99 @@ function ImportCVModal({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function N8nModal({
+  onClose,
+  addToast
+}: {
+  onClose: () => void;
+  addToast: (msg: string, type: 'info' | 'success' | 'warning') => void;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+  const webhookUrl = 'https://zaydentity.vercel.app/api/n8n';
+
+  async function testWebhook() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/n8n', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cvText: 'Zayd Ali Mohamed — Senior AI & Full-Stack Engineer with React, Next.js, TypeScript, Python, PyTorch, Node.js, and n8n Automation.'
+        })
+      });
+      const data = await res.json();
+      setTestResult(data);
+      if (res.ok) {
+        addToast('✓ n8n Webhook Pipeline Test Succeeded!', 'success');
+      } else {
+        addToast('Webhook test failed', 'warning');
+      }
+    } catch (e: any) {
+      setTestResult({ error: e.message });
+      addToast('Failed to connect to n8n webhook API', 'warning');
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function copyWebhook() {
+    navigator.clipboard.writeText(webhookUrl);
+    addToast('n8n Webhook URL copied to clipboard!', 'info');
+  }
+
+  return (
+    <div className="modalback">
+      <div className="modal" style={{ maxWidth: 640 }}>
+        <div className="panelhead">
+          <div>
+            <div className="eyebrow" style={{ color: 'var(--brand)' }}>Automation Engine</div>
+            <h1>n8n Workflow Hub</h1>
+            <p className="sub">Connect self-hosted or cloud n8n instances to automate CV parsing and live portfolio updates.</p>
+          </div>
+          <button className="btn ghost" onClick={onClose}><X size={17} /></button>
+        </div>
+
+        <div className="deploy-step" style={{ background: 'var(--panel2)', padding: 14, borderRadius: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <b style={{ fontSize: 13, color: '#fff' }}>1-Click n8n Workflow Blueprint (.json)</b>
+              <div className="tiny" style={{ marginTop: 2 }}>Import this official JSON into n8n to connect Webhooks, AI processing & WhatsApp alerts.</div>
+            </div>
+            <a className="btn primary" href="/api/n8n/workflow" download="folioforge-n8n-workflow.json" style={{ textDecoration: 'none' }}>
+              <Download size={14} /> Download Blueprint
+            </a>
+          </div>
+        </div>
+
+        <div className="deploy-step" style={{ marginTop: 12 }}>
+          <b style={{ fontSize: 13, color: '#fff' }}>Production Webhook Endpoint</b>
+          <div className="tiny" style={{ marginTop: 2 }}>Pass POST requests with JSON body <code>&#123; "cvText": "..." &#125;</code> to receive structured portfolio data.</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <input className="input" value={webhookUrl} readOnly style={{ fontFamily: 'DM Mono', fontSize: 12 }} />
+            <button className="btn" onClick={copyWebhook}><Copy size={14} />Copy</button>
+          </div>
+        </div>
+
+        <div className="deploy-step" style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <b style={{ fontSize: 13, color: '#fff' }}>Live Pipeline Diagnostic Test</b>
+            <button className="btn intel" onClick={testWebhook} disabled={testing}>
+              <RefreshCw size={13} className={testing ? 'spin' : ''} /> {testing ? 'Executing...' : 'Run Pipeline Test'}
+            </button>
+          </div>
+          {testResult && (
+            <pre style={{ background: '#000', padding: 12, borderRadius: 8, fontSize: 11, color: '#4ade80', overflowX: 'auto', marginTop: 10, maxHeight: 160 }}>
+              {JSON.stringify(testResult, null, 2)}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   );
