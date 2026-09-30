@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css';
 
 const favicon =
@@ -11,6 +13,7 @@ const favicon =
   );
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://zaydentity.vercel.app'),
   title: 'FolioForge — AI Portfolio Studio',
   description: 'Turn a CV into a structured, customizable portfolio and deploy it to Vercel — no database, no account.',
   icons: { icon: favicon },
@@ -18,7 +21,14 @@ export const metadata: Metadata = {
     title: 'FolioForge — AI Portfolio Studio',
     description: 'Turn a CV into a structured, customizable portfolio and deploy it to Vercel — no database, no account.',
     type: 'website',
+    images: ['/api/og']
   },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FolioForge — AI Portfolio Studio',
+    description: 'Turn a CV into a structured, customizable portfolio and deploy it to Vercel — no database, no account.',
+    images: ['/api/og']
+  }
 };
 
 export const viewport: Viewport = {
@@ -30,7 +40,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+        <SpeedInsights />
+      </body>
     </html>
   );
 }
