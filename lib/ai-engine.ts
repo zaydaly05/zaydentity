@@ -1,6 +1,6 @@
 import type { PortfolioConfig, PortfolioData, TemplateId, ThemeId } from '@/types/portfolio';
 
-// Extended tech keyword dictionary for auto-detection across 80+ technologies
+// Extended tech keyword dictionary for auto-detection across 100+ technologies
 const KNOWN_TECH_KEYWORDS = [
   'React', 'React.js', 'Next.js', 'TypeScript', 'JavaScript', 'Node.js', 'Express', 'Vue', 'Vue.js',
   'Angular', 'Svelte', 'Python', 'Django', 'Flask', 'FastAPI', 'Java', 'Spring Boot', 'Kotlin',
@@ -10,7 +10,9 @@ const KNOWN_TECH_KEYWORDS = [
   'Netlify', 'Terraform', 'Git', 'GitHub', 'GitLab', 'Figma', 'Webpack', 'Vite', 'Jest', 'Cypress',
   'TensorFlow', 'PyTorch', 'Pandas', 'NumPy', 'Scikit-learn', 'Tailwind', 'Tailwind CSS', 'Bootstrap',
   'HTML', 'HTML5', 'CSS', 'CSS3', 'Sass', 'Linux', 'Bash', 'Redux', 'jQuery', 'OpenAI', 'LangChain',
-  'LlamaIndex', 'n8n', 'Elasticsearch', 'Kafka', 'RabbitMQ', 'Microservices', 'CI/CD'
+  'LlamaIndex', 'n8n', 'Elasticsearch', 'Kafka', 'RabbitMQ', 'Microservices', 'CI/CD', 'NestJS',
+  'Nuxt', 'Astro', 'Remix', 'Electron', 'React Native', 'Postman', 'Nginx', 'Apache', 'Docker Compose',
+  'Helm', 'Ansible', 'Jenkins', 'GitHub Actions', 'OpenCV', 'HuggingFace', 'Spacy', 'Polars', 'R'
 ];
 
 export interface AuditBreakdown {
@@ -36,10 +38,54 @@ function matchKeyword(text: string, kw: string): boolean {
 }
 
 /**
- * Removes raw binary PDF metadata, tags, and object streams from extracted text.
+ * Removes raw binary PDF metadata, tags, LaTeX syntax, and object streams from extracted text.
+ * Works seamlessly with Overleaf templates (ModernCV, AltaCV, Awesome CV, Deedy, EuroPass, etc.).
  */
 export function cleanPDFNoise(text: string): string {
-  return text
+  let cleaned = text;
+
+  // If LaTeX markup is detected, convert LaTeX commands to plain readable text
+  if (/\\(?:documentclass|usepackage|begin|section|cventry|cvevent|href|url|cvtag|cvitem|name|author|email|phone)/g.test(cleaned) || /%|\\[a-zA-Z]+/g.test(cleaned)) {
+    // Extract explicit Overleaf/LaTeX template metadata before stripping
+    cleaned = cleaned.replace(/\\name\s*\{([^}]+)\}\s*\{([^}]+)\}/gi, '$1 $2\n');
+    cleaned = cleaned.replace(/\\firstname\s*\{([^}]+)\}\s*\\familyname\s*\{([^}]+)\}/gi, '$1 $2\n');
+    cleaned = cleaned.replace(/\\author\s*\{([^}]+)\}/gi, '$1\n');
+    cleaned = cleaned.replace(/\\email\s*\{([^}]+)\}/gi, '$1\n');
+    cleaned = cleaned.replace(/\\phone\s*\{([^}]+)\}/gi, '$1\n');
+    cleaned = cleaned.replace(/\\homepage\s*\{([^}]+)\}/gi, '$1\n');
+    cleaned = cleaned.replace(/\\social\[(?:github|linkedin)\]\s*\{([^}]+)\}/gi, '$1\n');
+
+    // Convert Overleaf section commands
+    cleaned = cleaned.replace(/\\(?:cv)?section\*?\s*\{([^}]+)\}/gi, '\n$1\n');
+    cleaned = cleaned.replace(/\\cvsect\s*\{([^}]+)\}/gi, '\n$1\n');
+    cleaned = cleaned.replace(/\\runsubsection\s*\{([^}]+)\}/gi, '\n$1\n');
+
+    // Convert Overleaf entry macros (ModernCV, AltaCV, Awesome CV, Deedy)
+    cleaned = cleaned.replace(/\\cventry\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}/gi, '$2 — $3 ($1)\n$6');
+    cleaned = cleaned.replace(/\\cvevent\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}/gi, '$1 — $2 ($3)\n');
+    cleaned = cleaned.replace(/\\cvitem\s*\{([^}]*)\}\s*\{([^}]*)\}/gi, '$1: $2\n');
+    cleaned = cleaned.replace(/\\cvtag\s*\{([^}]*)\}/gi, ' $1 ');
+
+    // Convert links
+    cleaned = cleaned.replace(/\\href\s*\{([^}]+)\}\s*\{([^}]+)\}/gi, '$2 ($1)');
+    cleaned = cleaned.replace(/\\url\s*\{([^}]+)\}/gi, '$1');
+
+    // Clean text styling macros (\textbf{}, \textit{}, \emph{}, \texttt{}, etc.)
+    cleaned = cleaned.replace(/\\text(?:bf|it|tt|sc|sf|rm)\s*\{([^}]+)\}/gi, '$1');
+    cleaned = cleaned.replace(/\\emph\s*\{([^}]+)\}/gi, '$1');
+
+    // Remove comments and control blocks
+    cleaned = cleaned.replace(/%.*$/gm, '');
+    cleaned = cleaned.replace(/\\(?:documentclass|usepackage|begin|end|geometry|definecolor|color|vspace|hspace|pagestyle|thispagestyle|setlength|tikz|font-awesome|faIcon|fa[A-Z][a-zA-Z]+).*/gi, '');
+  }
+
+  // Normalize LaTeX accent commands like \'e, \`a, \^o, \"u
+  cleaned = cleaned.replace(/\\['`^"~]\s*([a-zA-Z])/g, '$1');
+
+  // Strip remaining single backslash commands
+  cleaned = cleaned.replace(/\\[a-zA-Z]+\b/g, ' ');
+
+  return cleaned
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(line => {
@@ -80,7 +126,15 @@ export function parseCVText(rawText: string): PortfolioData {
 
   for (const line of lines) {
     const candidate = line.replace(/[^a-zA-Z\s.'-]/g, '').trim();
-    if (candidate && candidate.length > 2 && candidate.length < 35 && !candidate.toLowerCase().includes('pdf') && !candidate.toLowerCase().includes('resume') && !candidate.toLowerCase().includes('curriculum')) {
+    const candLower = candidate.toLowerCase();
+    if (
+      candidate && candidate.length > 2 && candidate.length < 35 &&
+      !candLower.includes('pdf') && !candLower.includes('resume') && !candLower.includes('curriculum') &&
+      !candLower.includes('email') && !candLower.includes('phone') && !candLower.includes('github') &&
+      !candLower.includes('linkedin') && !candLower.includes('page') && !candLower.includes('contact') &&
+      !candLower.includes('experience') && !candLower.includes('education') && !candLower.includes('skills') &&
+      !candLower.includes('projects') && !candLower.includes('summary') && !candLower.includes('about')
+    ) {
       name = candidate;
       break;
     }
@@ -113,7 +167,7 @@ export function parseCVText(rawText: string): PortfolioData {
     }
   }
 
-  // 4. Auto-detect Sections (Experience, Education, Projects)
+  // 4. Auto-detect Sections (Experience, Education, Projects across all LaTeX / Overleaf templates)
   const experience: PortfolioData['experience'] = [];
   const education: PortfolioData['education'] = [];
   const projects: PortfolioData['projects'] = [];
@@ -126,30 +180,31 @@ export function parseCVText(rawText: string): PortfolioData {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lower = line.toLowerCase();
+    const cleanLine = line.replace(/^[-•*▪●✦►#\s\d.]*/, '').trim();
+    const cleanLower = cleanLine.toLowerCase();
 
-    if (/^(experience|work experience|employment|career)/i.test(lower)) {
+    if (/^(?:work\s+experience|experience|employment(?:\s+history)?|career|professional\s+experience|work\s+history|relevant\s+experience)/i.test(cleanLower)) {
       currentSection = 'experience';
       continue;
-    } else if (/^(education|academic|qualification)/i.test(lower)) {
+    } else if (/^(?:education|academic(?:\s+background|\s+qualifications)?|qualifications|degrees|education\s*&\s*training)/i.test(cleanLower)) {
       currentSection = 'education';
       continue;
-    } else if (/^(projects|selected projects|personal projects)/i.test(lower)) {
+    } else if (/^(?:projects|selected\s+projects|personal\s+projects|key\s+projects|featured\s+projects|technical\s+projects|open\s+source)/i.test(cleanLower)) {
       currentSection = 'projects';
       continue;
-    } else if (/^(skills|technical skills|technologies)/i.test(lower)) {
+    } else if (/^(?:skills|technical\s+skills|technologies|core\s+competencies|programming\s+languages|hard\s+skills)/i.test(cleanLower)) {
       currentSection = 'skills';
       continue;
-    } else if (/^(activities|achievements|certifications|awards)/i.test(lower)) {
+    } else if (/^(?:activities|achievements|certifications|awards|honors|publications|licenses|extracurricular)/i.test(cleanLower)) {
       currentSection = 'activities';
       continue;
-    } else if (/^(soft skills|competencies)/i.test(lower)) {
+    } else if (/^(?:soft\s+skills|interpersonal\s+skills|competencies)/i.test(cleanLower)) {
       currentSection = 'softSkills';
       continue;
-    } else if (/^(languages|language proficiency)/i.test(lower)) {
+    } else if (/^(?:languages|language\s+proficiency|language\s+skills)/i.test(cleanLower)) {
       currentSection = 'languages';
       continue;
-    } else if (/^(about|summary|profile|objective)/i.test(lower)) {
+    } else if (/^(?:about|about\s+me|summary|professional\s+summary|profile|personal\s+profile|objective|executive\s+summary)/i.test(cleanLower)) {
       currentSection = 'summary';
       continue;
     }
